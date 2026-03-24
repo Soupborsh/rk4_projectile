@@ -7,11 +7,13 @@ use scan_fmt::*;
 type F = f32;
 
 const G: F = -9.81;
-// const G: F = 0.0;
 
-// const M: F = 0.075;
-const KD: F = 0.2;
-const KM: F = 0.1;
+const MASS: F = 0.075;
+const K_DRAG: F = 0.5;
+const K_MAGNUS: F = 0.5;
+
+const KD: F = K_DRAG / MASS;
+const KM: F = K_MAGNUS / MASS;
 
 // TODO: add rotation deceleration
 const ROTATION_SPEED: F = 1.0;
