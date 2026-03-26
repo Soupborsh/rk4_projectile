@@ -9,8 +9,8 @@ type F = f32;
 const G: F = -9.81;
 
 const MASS: F = 0.075;
-const K_DRAG: F = 0.0;
-const K_MAGNUS: F = 0.0;
+const K_DRAG: F = 0.01;
+const K_MAGNUS: F = 0.01;
 
 const KD: F = K_DRAG / MASS;
 const KM: F = K_MAGNUS / MASS;
@@ -24,10 +24,13 @@ fn main() {
 
     let goal = Vector2::new(x, y);
     let a = secant_converge(goal, v);
+    // let a = F::to_radians(46.9177);
+
     println!("optimal_angle: {}", a.to_degrees());
     let res = fly_until_x(goal[0], v, a, 1.0);
     println!("TOF: {} s", res.unwrap().1);
     plot(&get_state(v, a), goal);
+    plot_y_err(goal, v);
 }
 
 fn get_derivative(state: Vector4<F>) -> Vector4<F> {
@@ -62,7 +65,7 @@ fn fly_until_x(x: F, v: F, a: F, timeout: F) -> Option<(Vector4<F>, F)> {
 }
 
 fn y_err(goal: Vector2<F>, v: F, a: F) -> Option<F> {
-    fly_until_x(goal[0], v, a, 1.0).map(|final_state| final_state.0[1] - goal[1])
+    fly_until_x(goal[0], v, a, 10.0).map(|final_state| final_state.0[1] - goal[1])
 }
 
 fn get_state(v: F, a: F) -> Vector4<F> {
@@ -83,7 +86,7 @@ fn secant_get_x(b: F, c: F, goal: Vector2<F>, v: F) -> F {
 fn secant_converge(goal: Vector2<F>, v: F) -> F {
     let mut c; // TODO: better initial angles?
     let mut b = F::atan2(goal[1], goal[0]);
-    let mut a = (8.0 * b + F::to_radians(90.0) * 2.0) / 10.0;
+    let mut a = b + 5.0;
     for _ in 0..16 {
         c = b;
         b = a;
@@ -126,9 +129,9 @@ fn plot_y_err(goal: Vector2<F>, v: F) {
     let r: F = F::to_radians(90.0);
     let l: F = 0.0;
     // let l: F = F::atan2(goal[1], goal[0]);
-    let step = (r - l) / 128.0;
+    let step = (r - l) / 512.0;
     let a = l;
-    let (x, y): (Vec<F>, Vec<F>) = (1..=128)
+    let (x, y): (Vec<F>, Vec<F>) = (1..=512)
         .map(|i| a + i as F * step)
         .filter_map(|current_a| y_err(goal, v, current_a).map(|err| (current_a.to_degrees(), err)))
         .unzip();
