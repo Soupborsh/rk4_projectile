@@ -20,19 +20,14 @@ const DT: F = 0.01;
 // TODO: add rotation deceleration
 const ROTATION_SPEED: F = 1.0;
 fn main() {
-    let v: F = scanln_fmt!("{}", F).unwrap();
+    let (v, x, y): (F, F, F) = scanln_fmt!("{} {} {}", F, F, F).unwrap();
 
-    // state {x, y, vx, vy}
-
-    // let a = aim_angle_at(Vector2::new(4.0, 2.0), v);
-    // let state = {
-    //     let (sin, cos) = a.sin_cos();
-    //     Vector4::new(0.0, 0.0, v * cos, v * sin)
-    // };
-    // dbg!(state, rk4_step(state, dt));
-    // plot(&state);
-    plot_y_err(Vector2::new(4.0, 2.0), v);
-    secant_converge(Vector2::new(4.0, 2.0), v);
+    let goal = Vector2::new(x, y);
+    let a = secant_converge(goal, v);
+    println!("optimal_angle: {}", a.to_degrees());
+    let res = fly_until_x(goal[0], v, a, 1.0);
+    println!("TOF: {} s", res.unwrap().1);
+    plot(&get_state(v, a), goal);
 }
 
 fn get_derivative(state: Vector4<F>) -> Vector4<F> {
@@ -53,53 +48,21 @@ fn rk4_step(state: Vector4<F>, dt: F) -> Vector4<F> {
     state + dt * ((k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0)
 }
 
-fn fly_until_x(x: F, v: F, a: F, timeout: F) -> Option<Vector4<F>> {
+fn fly_until_x(x: F, v: F, a: F, timeout: F) -> Option<(Vector4<F>, F)> {
     let n: usize = (timeout / DT) as usize;
     let mut state = get_state(v, a);
-    for _ in 0..n {
+    for i in 0..n {
         state = rk4_step(state, DT);
         if state[0] > x {
-            return Some(state);
+            return Some((state, DT * i as F));
         }
     }
 
     None
 }
 
-// fn bs_check_angle(goal: Vector2<F>, v: F, a: F) -> bool {
-//     let initial_state = get_state(v, a);
-//     let res = fly_until_x(&initial_state, goal[0], 1.0);
-//     if res.is_none() {
-//         false
-//     } else {
-//         (res.unwrap()[1] - goal[1]) > 0.0
-//     }
-// }
-
-// fn aim_angle_at(goal: Vector2<F>, v: F) -> F {
-//     let mut r: F = F::to_radians(90.0);
-//     let mut l: F = F::atan2(goal[1], goal[0]);
-//     let mut m = (l + r) / 2.0;
-//     for _ in 0..32 {
-//         if !bs_check_angle(goal, v, m) {
-//             r = m;
-//         } else {
-//             l = m;
-//         }
-//         m = (l + r) / 2.0;
-//     }
-//     m
-//     // let state = {
-//     //     let (sin, cos) = a.sin_cos();
-//     //     Vector4::new(0.0, 0.0, v * cos, v * sin)
-//     // };
-//     // let result = fly_until_x(&state, goal[0], 1.0).unwrap();
-
-//     // None
-// }
-
 fn y_err(goal: Vector2<F>, v: F, a: F) -> Option<F> {
-    fly_until_x(goal[0], v, a, 1.0).map(|final_state| final_state[1] - goal[1])
+    fly_until_x(goal[0], v, a, 1.0).map(|final_state| final_state.0[1] - goal[1])
 }
 
 fn get_state(v: F, a: F) -> Vector4<F> {
@@ -107,21 +70,21 @@ fn get_state(v: F, a: F) -> Vector4<F> {
     Vector4::new(0.0, 0.0, v * cos, v * sin)
 }
 
-fn parabola_angle(goal: Vector2<F>, v: F) -> F {
-    F::asin(goal[1] / goal[0] - (G * goal[0]) / (v * v)) / 2.0
-}
+// fn parabola_angle(goal: Vector2<F>, v: F) -> F {
+//     F::asin(goal[1] / goal[0] - (G * goal[0]) / (v * v)) / 2.0
+// }
 
 fn secant_get_x(b: F, c: F, goal: Vector2<F>, v: F) -> F {
     let fb = y_err(goal, v, b).unwrap();
-    let fc = y_err(goal, v, c).unwrap();
+    let fc = y_err(goal, v, c).unwrap(); // TODO: proper error handling
     b - (fb) / ((fb - fc) / (b - c))
 }
 
 fn secant_converge(goal: Vector2<F>, v: F) -> F {
-    let mut c;
+    let mut c; // TODO: better initial angles?
     let mut b = F::atan2(goal[1], goal[0]);
-    let mut a = parabola_angle(goal, v);
-    for _ in 0..10 {
+    let mut a = (8.0 * b + F::to_radians(90.0) * 2.0) / 10.0;
+    for _ in 0..16 {
         c = b;
         b = a;
         a = secant_get_x(b, c, goal, v);
@@ -129,24 +92,35 @@ fn secant_converge(goal: Vector2<F>, v: F) -> F {
     a
 }
 
-// fn plot(initial_state: &Vector4<F>) {
-//     let mut state = *initial_state;
-//     let (x, y): (Vec<f32>, Vec<f32>) = (0..256)
-//         .map(|_| {
-//             state = rk4_step(state, 0.01);
-//             (state[0], state[1])
-//         })
-//         .unzip();
+fn plot(initial_state: &Vector4<F>, goal: Vector2<F>) {
+    let mut state = *initial_state;
+    let (x, y): (Vec<f32>, Vec<f32>) = (0..256)
+        .map(|_| {
+            state = rk4_step(state, 0.01);
+            (state[0], state[1])
+        })
+        .unzip();
 
-//     let mut fg = Figure::new();
-//     fg.axes2d().lines(
-//         &x,
-//         &y,
-//         &[Caption("Projectile"), Color(gnuplot::ColorType::Black)],
-//     );
+    let mut fg = Figure::new();
+    fg.axes2d()
+        .set_x_axis(true, &[PlotOption::Caption("x")])
+        .set_y_axis(true, &[PlotOption::Caption("y")])
+        .points(
+            [goal[0]],
+            [goal[1]],
+            &[
+                PlotOption::Color(gnuplot::ColorType::RGBInteger(0xff, 0, 0)),
+                PlotOption::PointSymbol('x'),
+            ],
+        )
+        .lines(
+            &x,
+            &y,
+            &[Caption("Projectile"), Color(gnuplot::ColorType::Black)],
+        );
 
-//     fg.show().unwrap();
-// }
+    fg.show().unwrap();
+}
 
 fn plot_y_err(goal: Vector2<F>, v: F) {
     let r: F = F::to_radians(90.0);
