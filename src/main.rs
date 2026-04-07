@@ -1,21 +1,27 @@
+#![allow(dead_code, unused)]
 extern crate nalgebra as na;
 
-use gnuplot::{Caption, Color, Figure, PlotOption};
+// use gnuplot::{
+//     Axes2D, AxesCommon, Caption, Color, ColorType, Figure,
+//     PlotOption::{self, LineWidth},
+// };
+
+use gnuplot::*;
 use na::{Vector2, Vector4};
 use scan_fmt::*;
 
-type F = f32;
+type F = f64;
 
 const G: F = -9.81;
 
 const MASS: F = 0.075;
-const K_DRAG: F = 0.01;
+const K_DRAG: F = 0.1;
 const K_MAGNUS: F = 0.01;
 
 const KD: F = K_DRAG / MASS;
 const KM: F = K_MAGNUS / MASS;
 
-const DT: F = 0.01;
+const DT: F = 0.001;
 
 // TODO: add rotation deceleration
 const ROTATION_SPEED: F = 1.0;
@@ -23,14 +29,18 @@ fn main() {
     let (v, x, y): (F, F, F) = scanln_fmt!("{} {} {}", F, F, F).unwrap();
 
     let goal = Vector2::new(x, y);
-    let a = secant_converge(goal, v);
-    // let a = F::to_radians(46.9177);
 
-    println!("optimal_angle: {}", a.to_degrees());
-    let res = fly_until_x(goal[0], v, a, 1.0);
-    println!("TOF: {} s", res.unwrap().1);
-    plot(&get_state(v, a), goal);
-    plot_y_err(goal, v);
+    let mut fg = Figure::new();
+    let mut ax = fg.axes2d();
+    ax.set_x_range(Fix(0.0), Auto);
+    ax.set_y_range(Fix(0.0), Auto);
+    // fg.set_terminal("svg size 800,600", "trajectories.svg");
+    plot_point(ax, Vector2::new(0.0, 0.0), ColorType::RGBInteger(255, 0, 0));
+    plot_and_find_trajectory(ax, v, goal, ColorType::Black);
+    plot_and_find_trajectory(ax, v - 10.0, goal, ColorType::RGBInteger(255, 0, 0));
+    plot_and_find_trajectory(ax, v - 20.0, goal, ColorType::RGBInteger(0, 255, 0));
+    plot_point(ax, goal, ColorType::RGBInteger(255, 0, 0));
+    fg.show().unwrap();
 }
 
 fn get_derivative(state: Vector4<F>) -> Vector4<F> {
@@ -65,7 +75,7 @@ fn fly_until_x(x: F, v: F, a: F, timeout: F) -> Option<(Vector4<F>, F)> {
 }
 
 fn y_err(goal: Vector2<F>, v: F, a: F) -> Option<F> {
-    fly_until_x(goal[0], v, a, 10.0).map(|final_state| final_state.0[1] - goal[1])
+    fly_until_x(goal[0], v, a, 100.0).map(|final_state| final_state.0[1] - goal[1])
 }
 
 fn get_state(v: F, a: F) -> Vector4<F> {
@@ -73,31 +83,92 @@ fn get_state(v: F, a: F) -> Vector4<F> {
     Vector4::new(0.0, 0.0, v * cos, v * sin)
 }
 
-// fn parabola_angle(goal: Vector2<F>, v: F) -> F {
-//     F::asin(goal[1] / goal[0] - (G * goal[0]) / (v * v)) / 2.0
-// }
-
 fn secant_get_x(b: F, c: F, goal: Vector2<F>, v: F) -> F {
     let fb = y_err(goal, v, b).unwrap();
     let fc = y_err(goal, v, c).unwrap(); // TODO: proper error handling
     b - (fb) / ((fb - fc) / (b - c))
 }
 
+const N_ITER_MAX: usize = 32;
+const PRECISION: F = 0.0001;
+
 fn secant_converge(goal: Vector2<F>, v: F) -> F {
     let mut c; // TODO: better initial angles?
     let mut b = F::atan2(goal[1], goal[0]);
     let mut a = b + 5.0;
-    for _ in 0..16 {
+    for _ in 0..N_ITER_MAX {
         c = b;
         b = a;
+        if (b - c).abs() < PRECISION {
+            break;
+        }
         a = secant_get_x(b, c, goal, v);
     }
     a
 }
 
+fn secant_converge_dbg(goal: Vector2<F>, v: F, a: F, b: F) -> (F, Vec<F>) {
+    let mut c; // TODO: better initial angles?
+    let mut b = b;
+    let mut a = a;
+    let mut ye;
+    let mut yes = Vec::<F>::new();
+    for _ in 0..N_ITER_MAX {
+        c = b;
+        b = a;
+        a = secant_get_x(b, c, goal, v);
+        ye = y_err(goal, v, a).unwrap_or(-100.0);
+        dbg!(a.to_degrees(), ye);
+        yes.push(ye);
+        if ye.abs() < PRECISION {
+            break;
+        }
+    }
+    (a, yes)
+}
+
+fn plot_and_find_trajectory<'a>(
+    ax: &'a mut Axes2D,
+    v: F,
+    goal: Vector2<F>,
+    color: ColorType<&str>,
+) -> &'a mut Axes2D {
+    let a = secant_converge(goal, v);
+    dbg!(y_err(goal, v, a));
+    plot_trajectory(ax, v, a, color)
+}
+
+fn plot_trajectory<'a>(ax: &'a mut Axes2D, v: F, a: F, color: ColorType<&str>) -> &'a mut Axes2D {
+    let mut state = get_state(v, a);
+    let (x, y): (Vec<F>, Vec<F>) = (0..1024)
+        .map(|i| {
+            if i != 0 {
+                state = rk4_step(state, DT);
+            }
+            (state[0], state[1])
+        })
+        .unzip();
+    plot_lines(ax, x, y, color)
+}
+
+fn plot_lines<'a>(
+    ax: &'a mut Axes2D,
+    x: Vec<F>,
+    y: Vec<F>,
+    color: ColorType<&str>,
+) -> &'a mut Axes2D {
+    ax.lines(&x, &y, &[Color(color), LineWidth(8.0)]);
+    ax
+}
+
+fn plot_point<'a>(ax: &'a mut Axes2D, p: Vector2<F>, color: ColorType<&str>) -> &'a mut Axes2D {
+    ax.points([p[0]], [p[1]], &[Color(color), LineWidth(8.0)]);
+    ax
+}
+
 fn plot(initial_state: &Vector4<F>, goal: Vector2<F>) {
     let mut state = *initial_state;
-    let (x, y): (Vec<f32>, Vec<f32>) = (0..256)
+    let (x, y): (Vec<F>, Vec<F>) = (0..256)
         .map(|_| {
             state = rk4_step(state, 0.01);
             (state[0], state[1])
@@ -112,14 +183,19 @@ fn plot(initial_state: &Vector4<F>, goal: Vector2<F>) {
             [goal[0]],
             [goal[1]],
             &[
-                PlotOption::Color(gnuplot::ColorType::RGBInteger(0xff, 0, 0)),
+                // PlotOption::Color(gnuplot::ColorType::RGBInteger(0xff, 0, 0)),
                 PlotOption::PointSymbol('x'),
+                LineWidth(8.0),
             ],
         )
         .lines(
             &x,
             &y,
-            &[Caption("Projectile"), Color(gnuplot::ColorType::Black)],
+            &[
+                Caption("Projectile"),
+                Color(gnuplot::ColorType::Black),
+                LineWidth(8.0),
+            ],
         );
 
     fg.show().unwrap();
@@ -129,9 +205,9 @@ fn plot_y_err(goal: Vector2<F>, v: F) {
     let r: F = F::to_radians(90.0);
     let l: F = 0.0;
     // let l: F = F::atan2(goal[1], goal[0]);
-    let step = (r - l) / 512.0;
+    let step = (r - l) / 2048.0;
     let a = l;
-    let (x, y): (Vec<F>, Vec<F>) = (1..=512)
+    let (x, y): (Vec<F>, Vec<F>) = (1..=2048)
         .map(|i| a + i as F * step)
         .filter_map(|current_a| y_err(goal, v, current_a).map(|err| (current_a.to_degrees(), err)))
         .unzip();
@@ -139,12 +215,17 @@ fn plot_y_err(goal: Vector2<F>, v: F) {
 
     let mut fg = Figure::new();
     fg.axes2d()
+        .set_grid_options(false, &[])
         .set_x_axis(true, &[PlotOption::Caption("Angle")])
         .set_y_axis(true, &[PlotOption::Caption("Y error")])
         .lines(
             &x,
             &y,
-            &[Caption("Y error"), Color(gnuplot::ColorType::Black)],
+            &[
+                Caption("Y error"),
+                Color(gnuplot::ColorType::Black),
+                LineWidth(8.0),
+            ],
         );
     fg.show().unwrap();
 }
