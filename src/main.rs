@@ -61,13 +61,25 @@ fn rk4_step(state: Vector4<F>, dt: F) -> Vector4<F> {
     state + dt * ((k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0)
 }
 
+const DIV_MIN_SAFE: F = 0.00001;
+
 fn fly_until_x(x: F, v: F, a: F, timeout: F) -> Option<(Vector4<F>, F)> {
     let n: usize = (timeout / DT) as usize;
     let mut state = get_state(v, a);
+    let mut prev_state;
     for i in 0..n {
+        prev_state = state;
         state = rk4_step(state, DT);
-        if state[0] > x {
-            return Some((state, DT * i as F));
+        if state[0].abs() > x.abs() {
+            // Do not divide by 0. abs() probably needed when flying -x(left)
+            if (state.x - prev_state.x).abs() < DIV_MIN_SAFE {
+                return Some((state, DT * i as F));
+            }
+            // lerp state, more accurate y
+            let t = (x - prev_state.x) / (state.x - prev_state.x);
+            let interpolated_state = prev_state.lerp(&state, t);
+            let time = DT * (i as F + t - 1.0); // idk if it is safe when i = 0, maybe
+            return Some((interpolated_state, time));
         }
     }
 
